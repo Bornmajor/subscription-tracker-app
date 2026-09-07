@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="An admin dashboard for managing subscription records." />
+    <title>Subscription Tracker Admin</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="dashboard">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">ADMIN DASHBOARD</p>
+          <h1>Subscription Tracker</h1>
+          <p class="page-description">Create, view, update, and delete subscription records.</p>
+        </div>
+        <button id="refresh-button" class="secondary-button" type="button">Refresh subscriptions</button>
+      </header>
+
+      <section class="api-key-panel" aria-labelledby="api-key-title">
+        <div>
+          <h2 id="api-key-title">Connect to the API</h2>
+          <p>Enter the shared API key from your <code>.env</code> file to manage subscriptions.</p>
+        </div>
+        <div class="api-key-controls">
+          <label class="visually-hidden" for="api-key-input">API key</label>
+          <input id="api-key-input" type="password" placeholder="Enter API key" autocomplete="off" />
+          <button id="save-api-key-button" type="button">Connect</button>
+        </div>
+      </section>
+
+      <p id="status-message" class="status-message" role="status" aria-live="polite"></p>
+
+      <section class="content-grid">
+        <section class="panel form-panel" aria-labelledby="form-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">SUBSCRIPTION FORM</p>
+              <h2 id="form-title">Create subscription</h2>
+            </div>
+            <button id="cancel-edit-button" class="text-button hidden" type="button">Cancel edit</button>
+          </div>
+
+          <form id="subscription-form">
+            <div class="form-field">
+              <label for="name">Subscription name</label>
+              <input id="name" name="name" type="text" placeholder="Netflix" required />
+            </div>
+
+            <div class="form-row">
+              <div class="form-field">
+                <label for="price">Price</label>
+                <input id="price" name="price" type="number" min="0.01" step="0.01" placeholder="15.49" required />
+              </div>
+              <div class="form-field">
+                <label for="billing-cycle">Billing cycle</label>
+                <select id="billing-cycle" name="billingCycle" required>
+                  <option value="monthly">Monthly</option>
+                  <option value="yearly">Yearly</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-field">
+              <label for="next-payment-date">Next payment date</label>
+              <input id="next-payment-date" name="nextPaymentDate" type="date" required />
+            </div>
+
+            <div class="form-field">
+              <label for="category">Category</label>
+              <input id="category" name="category" type="text" placeholder="Entertainment" required />
+            </div>
+
+            <button id="submit-button" type="submit">Create subscription</button>
+          </form>
+        </section>
+
+        <section class="panel list-panel" aria-labelledby="subscriptions-title">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">YOUR RECORDS</p>
+              <h2 id="subscriptions-title">Subscriptions</h2>
+            </div>
+            <span id="subscription-count" class="count-badge">0</span>
+          </div>
+
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Price</th>
+                  <th>Cycle</th>
+                  <th>Next payment</th>
+                  <th>Category</th>
+                  <th><span class="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody id="subscription-list"></tbody>
+            </table>
+          </div>
+          <p id="empty-state" class="empty-state">Connect with an API key to load subscriptions.</p>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
