@@ -1,0 +1,19 @@
+{
+  "name": "subscription-tracker-app",
+  "version": "1.0.0",
+  "description": "A REST API for managing subscriptions.",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "test": "node --test --test-concurrency=1"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "mongoose": "^9.9.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
