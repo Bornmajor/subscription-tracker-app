@@ -38,11 +38,24 @@ const subscriptionSchema = new mongoose.Schema( // Creates rules for the shape o
       type: Date, // Stores the change time as a date.
       default: Date.now, // Uses the current server time when a client does not supply its own change time.
     }, // Ends the updatedAt field configuration; last-write-wins compares this value.
+    deletedAt: { // Marks a soft-deleted subscription (a tombstone) instead of removing the document.
+      type: Date, // Stores when the subscription was deleted.
+      default: null, // Uses null for subscriptions that are not deleted.
+    }, // Ends the deletedAt field; keeping tombstones lets other devices learn about deletions.
+    serverUpdatedAt: { // Records WHEN the server stored the latest change, always using the server's clock.
+      type: Date, // Stores the server-side change time.
+      default: Date.now, // Uses the current server time for new documents.
+      index: true, // Speeds up delta-sync queries that filter by this field.
+    }, // Ends the serverUpdatedAt field; delta pulls use it because device clocks can be wrong.
   }, // Ends the fields stored for each subscription.
   {
     timestamps: { createdAt: true, updatedAt: false }, // Lets Mongoose maintain createdAt only; updatedAt is controlled by the API so offline edits keep their real change time.
   }, // Ends the schema options.
 ); // Ends the Subscription schema definition.
+
+subscriptionSchema.pre('save', function setServerUpdatedAt() { // Runs before every create or save of a subscription document.
+  this.serverUpdatedAt = new Date(); // Stamps the server's own time on every stored change so delta pulls never miss it.
+}); // Ends the pre-save hook.
 
 const Subscription = mongoose.model('Subscription', subscriptionSchema); // Creates the model used to query and save subscriptions.
 

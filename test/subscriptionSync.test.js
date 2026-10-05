@@ -111,3 +111,62 @@ test('PUT rejects incomplete new records and invalid change times', async () => 
   assert.equal(badTime.status, 400); // Confirms invalid change times are rejected.
   assert.equal(badTime.body.message, 'updatedAt must be a valid date.'); // Confirms the error explains the problem.
 }); // Ends the validation test.
+
+async function send(method, path, body) { // Sends any request with the API key and returns the status and parsed JSON.
+  const response = await fetch(`${baseUrl}/api/subscriptions${path}`, { // Sends the request to the temporary server.
+    method, // Uses the HTTP method chosen by the test.
+    headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.API_KEY }, // Supplies JSON content type and the API key.
+    body: body === undefined ? undefined : JSON.stringify(body), // Sends a JSON body only when the test provides one.
+  }); // Ends the request options.
+  return { status: response.status, body: await response.json() }; // Returns the parts each test checks.
+} // Ends the generic request helper.
+
+test('DELETE keeps a tombstone instead of removing the document', async () => { // Tests soft deletion.
+  await put(CLIENT_ID, validBody()); // Creates the subscription.
+  const { status } = await send('DELETE', `/${CLIENT_ID}`); // Deletes it.
+  const stored = await Subscription.findById(CLIENT_ID); // Reads the document directly from MongoDB.
+
+  assert.equal(status, 200); // Confirms the deletion succeeded.
+  assert.ok(stored); // Confirms the document still exists as a tombstone.
+  assert.ok(stored.deletedAt instanceof Date); // Confirms it is marked as deleted.
+}); // Ends the tombstone test.
+
+test('soft-deleted subscriptions are hidden from the list and fetch-one', async () => { // Tests that normal reads skip tombstones.
+  await put(CLIENT_ID, validBody()); // Creates the subscription.
+  await send('DELETE', `/${CLIENT_ID}`); // Deletes it.
+
+  const list = await send('GET', ''); // Fetches the normal list.
+  const one = await send('GET', `/${CLIENT_ID}`); // Fetches the deleted subscription by ID.
+
+  assert.equal(list.body.subscriptions.length, 0); // Confirms the list hides the tombstone.
+  assert.equal(one.status, 404); // Confirms fetch-one treats it as not found.
+}); // Ends the hidden-tombstone test.
+
+test('deleting twice succeeds and keeps the first deletion time', async () => { // Tests a retried DELETE.
+  await put(CLIENT_ID, validBody()); // Creates the subscription.
+  await send('DELETE', `/${CLIENT_ID}`); // Deletes it.
+  const firstDeletedAt = (await Subscription.findById(CLIENT_ID)).deletedAt; // Records the first deletion time.
+  const retry = await send('DELETE', `/${CLIENT_ID}`); // Sends the same deletion again.
+
+  assert.equal(retry.status, 200); // Confirms the retry is not an error.
+  assert.deepEqual((await Subscription.findById(CLIENT_ID)).deletedAt, firstDeletedAt); // Confirms nothing changed.
+}); // Ends the delete-twice test.
+
+test('an edit to a deleted subscription is not applied (deletes win)', async () => { // Tests an offline edit arriving after a deletion.
+  await put(CLIENT_ID, validBody({ updatedAt: '2026-10-01T10:00:00.000Z' })); // Creates the subscription.
+  await send('DELETE', `/${CLIENT_ID}`, { updatedAt: '2026-10-02T10:00:00.000Z' }); // Deletes it on Oct 2.
+  const { body } = await put(CLIENT_ID, { price: 1, updatedAt: '2026-10-03T10:00:00.000Z' }); // Sends a later edit from another device.
+
+  assert.equal(body.applied, false); // Confirms the edit did not revive the record.
+  assert.ok(body.subscription.deletedAt); // Confirms the tombstone is returned so the client deletes its copy.
+}); // Ends the deletes-win test.
+
+test('every stored change updates serverUpdatedAt', async () => { // Tests the server-side change clock used by delta pulls.
+  await put(CLIENT_ID, validBody({ updatedAt: '2020-01-01T00:00:00.000Z' })); // Creates a record whose CLIENT change time is very old.
+  const created = (await Subscription.findById(CLIENT_ID)).serverUpdatedAt; // Reads the server time of the create.
+  await send('DELETE', `/${CLIENT_ID}`); // Deletes it.
+  const deleted = (await Subscription.findById(CLIENT_ID)).serverUpdatedAt; // Reads the server time of the deletion.
+
+  assert.ok(created > new Date('2026-01-01')); // Confirms the server used its own clock, not the old client time.
+  assert.ok(deleted >= created); // Confirms the deletion moved serverUpdatedAt forward.
+}); // Ends the serverUpdatedAt test.

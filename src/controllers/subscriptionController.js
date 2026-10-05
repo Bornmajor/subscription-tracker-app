@@ -38,7 +38,7 @@ async function createSubscription(req, res, next) { // Defines the controller th
 
 async function getSubscriptions(req, res, next) { // Defines the controller that fetches every subscription.
   try { // Begins error handling for the asynchronous database operation.
-    const subscriptions = await Subscription.find(); // Queries MongoDB for all subscription documents.
+    const subscriptions = await Subscription.find({ deletedAt: null }); // Queries MongoDB for subscriptions that are not soft-deleted.
 
     res.status(200).json({ // Sets the successful HTTP status and starts the JSON response.
       subscriptions, // Returns the array of matching subscription documents.
@@ -52,7 +52,7 @@ async function getSubscriptionById(req, res, next) { // Defines the controller t
   try { // Begins error handling for the asynchronous database operation.
     const subscription = await Subscription.findById(req.params.id); // Queries MongoDB for the subscription with the ID from the route URL.
 
-    if (!subscription) { // Checks whether MongoDB found a subscription with the supplied ID.
+    if (!subscription || subscription.deletedAt) { // Treats a missing or soft-deleted subscription the same way.
       return res.status(404).json({ // Stops the controller and sets the Not Found HTTP status.
         message: 'Subscription not found.', // Explains that no subscription exists with this ID.
       }); // Ends and sends the not-found response.
@@ -82,6 +82,14 @@ async function upsertSubscription(req, res, next) { // Defines the controller th
       }); // Ends and sends the create response.
     } // Ends the create branch.
 
+    if (existing.deletedAt) { // Handles an edit to a subscription that was deleted (possibly by another device).
+      return res.status(200).json({ // Responds successfully because the client simply needs to learn about the deletion.
+        message: 'The subscription was deleted; the change was not applied.', // Explains why the data did not change.
+        subscription: existing, // Returns the tombstone (with deletedAt) so the client deletes its copy too.
+        applied: false, // Tells sync clients their change was not saved: deletes win over later edits.
+      }); // Ends and sends the deleted response.
+    } // Ends the deleted check.
+
     if (existing.updatedAt > changeTime) { // Detects a conflict: the server already holds a NEWER change than this one.
       return res.status(200).json({ // Responds successfully because nothing is wrong with the request itself.
         message: 'A newer version already exists; the change was not applied.', // Explains why the data did not change.
@@ -103,15 +111,22 @@ async function upsertSubscription(req, res, next) { // Defines the controller th
   } // Ends the error-handling block.
 } // Ends the upsert-subscription controller.
 
-async function deleteSubscription(req, res, next) { // Defines the controller that removes one subscription identified by the URL ID.
+async function deleteSubscription(req, res, next) { // Defines the controller that soft-deletes one subscription identified by the URL ID.
   try { // Begins error handling for the asynchronous database operation.
-    const subscription = await Subscription.findByIdAndDelete(req.params.id); // Finds and permanently deletes the subscription with the URL ID.
+    const changeTime = readClientChangeTime(req.body); // Reads when the client deleted it; clients that send nothing count as now.
+    const subscription = await Subscription.findById(req.params.id); // Looks up the subscription with the URL ID.
 
     if (!subscription) { // Checks whether MongoDB found a subscription with the supplied ID.
       return res.status(404).json({ // Stops the controller and sets the Not Found HTTP status.
-        message: 'Subscription not found.', // Explains that no subscription exists with this ID.
+        message: 'Subscription not found.', // Explains that no subscription exists with this ID; sync clients can treat this as already gone.
       }); // Ends and sends the not-found response.
     } // Ends the missing-subscription check.
+
+    if (!subscription.deletedAt) { // Only marks it once, so deleting twice (for example, a retried request) changes nothing.
+      subscription.deletedAt = new Date(); // Records the deletion with the server's time.
+      subscription.updatedAt = changeTime; // Records when the client made the deletion.
+      await subscription.save(); // Stores the tombstone; the pre-save hook updates serverUpdatedAt so delta pulls see it.
+    } // Ends the first-deletion check.
 
     res.status(200).json({ // Sets the successful HTTP status and starts the JSON response.
       message: 'Subscription deleted successfully.', // Gives the API client a clear result message.
