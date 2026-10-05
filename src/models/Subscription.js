@@ -34,9 +34,13 @@ const subscriptionSchema = new mongoose.Schema( // Creates rules for the shape o
       required: [true, 'Subscription category is required.'], // Rejects a subscription when its category is missing.
       trim: true, // Removes accidental whitespace from the beginning and end of the category.
     }, // Ends the category field configuration.
+    updatedAt: { // Records WHEN the latest change was made, by whichever client made it.
+      type: Date, // Stores the change time as a date.
+      default: Date.now, // Uses the current server time when a client does not supply its own change time.
+    }, // Ends the updatedAt field configuration; last-write-wins compares this value.
   }, // Ends the fields stored for each subscription.
   {
-    timestamps: true, // Makes Mongoose automatically maintain createdAt and updatedAt date fields.
+    timestamps: { createdAt: true, updatedAt: false }, // Lets Mongoose maintain createdAt only; updatedAt is controlled by the API so offline edits keep their real change time.
   }, // Ends the schema options.
 ); // Ends the Subscription schema definition.
 
