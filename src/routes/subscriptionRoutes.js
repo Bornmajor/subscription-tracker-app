@@ -4,7 +4,7 @@ const { // Starts importing the controller functions that contain each CRUD oper
   createSubscription, // Imports the function that creates one subscription.
   getSubscriptions, // Imports the function that fetches all subscriptions.
   getSubscriptionById, // Imports the function that fetches one subscription by its ID.
-  updateSubscription, // Imports the function that updates one subscription by its ID.
+  upsertSubscription, // Imports the function that creates or updates one subscription by its ID.
   deleteSubscription, // Imports the function that deletes one subscription by its ID.
 } = require('../controllers/subscriptionController'); // Ends the controller-function import.
 
@@ -15,7 +15,7 @@ router.use(apiKeyMiddleware); // Requires a valid x-api-key header for every rou
 router.post('/', createSubscription); // Handles POST /api/subscriptions requests by creating a subscription.
 router.get('/', getSubscriptions); // Handles GET /api/subscriptions requests by fetching all subscriptions.
 router.get('/:id', getSubscriptionById); // Handles GET /api/subscriptions/:id requests by fetching one subscription.
-router.put('/:id', updateSubscription); // Handles PUT /api/subscriptions/:id requests by updating one subscription.
+router.put('/:id', upsertSubscription); // Handles PUT /api/subscriptions/:id by creating the subscription if the ID is new, otherwise updating it (last-write-wins).
 router.delete('/:id', deleteSubscription); // Handles DELETE /api/subscriptions/:id requests by deleting one subscription.
 
 module.exports = router; // Makes this subscription router available to app.js.

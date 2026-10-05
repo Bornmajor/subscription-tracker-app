@@ -32,11 +32,39 @@ test('Subscription model accepts valid subscription data', async () => { // Defi
   assert.equal(subscription.name, 'Netflix'); // Confirms that validation retained the expected document data.
 }); // Ends the valid-data test.
 
+test('Subscription model accepts every billing cycle the mobile app uses', async () => { // Defines the test for the four supported billing cycles.
+  for (const billingCycle of ['daily', 'weekly', 'monthly', 'yearly']) { // Repeats the validation once for each supported cycle.
+    const subscription = new Subscription({ // Creates an unsaved subscription that differs only by billing cycle.
+      name: 'Netflix', // Provides a required non-empty name.
+      price: 15.49, // Provides a positive price.
+      billingCycle, // Uses the billing cycle currently being tested.
+      nextPaymentDate: '2026-10-07', // Provides a date Mongoose can parse.
+      category: 'entertainment', // Provides a required category.
+    }); // Ends the subscription data.
+
+    await subscription.validate(); // Fails the test if Mongoose rejects this billing cycle.
+  } // Ends the billing-cycle loop.
+}); // Ends the supported-billing-cycles test.
+
+test('Subscription model generates a UUID string ID by default', () => { // Defines the test for server-generated IDs.
+  const subscription = new Subscription({ name: 'Netflix' }); // Creates an unsaved subscription without supplying an ID.
+
+  assert.equal(typeof subscription._id, 'string'); // Confirms that the ID is text rather than a MongoDB ObjectId.
+  assert.match(subscription._id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/); // Confirms that the ID has the standard UUID shape.
+}); // Ends the generated-ID test.
+
+test('Subscription model keeps a client-supplied ID', () => { // Defines the test for IDs created offline by the mobile app.
+  const clientId = '3f2b8c1e-6a4d-4f0e-9b7a-2c5d8e1f0a3b'; // Represents a UUID that a mobile app generated while offline.
+  const subscription = new Subscription({ _id: clientId, name: 'Netflix' }); // Creates an unsaved subscription with the client's ID.
+
+  assert.equal(subscription._id, clientId); // Confirms that the server keeps the client's ID instead of replacing it.
+}); // Ends the client-supplied-ID test.
+
 test('Subscription model rejects invalid field values', async () => { // Defines the test for data that violates multiple schema rules.
   const subscription = new Subscription({ // Creates an unsaved subscription containing invalid data.
     name: 'Netflix', // Provides a valid name so the test focuses on the fields below.
     price: 0, // Violates the rule requiring a price greater than zero.
-    billingCycle: 'weekly', // Violates the rule allowing only monthly or yearly billing.
+    billingCycle: 'fortnightly', // Violates the rule allowing only daily, weekly, monthly, or yearly billing.
     nextPaymentDate: 'not-a-date', // Violates the rule requiring a valid date.
     category: 'entertainment', // Provides a valid category so the test focuses on the fields above.
   }); // Ends the invalid subscription data.

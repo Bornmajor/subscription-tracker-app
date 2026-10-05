@@ -1,8 +1,31 @@
 const Subscription = require('../models/Subscription'); // Imports the model used to read and change subscription documents in MongoDB.
 
+const WRITABLE_FIELDS = ['name', 'price', 'billingCycle', 'nextPaymentDate', 'category']; // Lists the only fields a client may set directly.
+
+function pickWritableFields(body = {}) { // Copies only the client-writable fields from a request body.
+  const fields = {}; // Starts with an empty object so unknown or protected fields are never copied.
+  for (const field of WRITABLE_FIELDS) { // Visits each field that clients are allowed to write.
+    if (body[field] !== undefined) fields[field] = body[field]; // Keeps a field only when the client sent it, which keeps PUT partial.
+  } // Ends the writable-field loop.
+  return fields; // Returns the safe subset; _id, updatedAt, and other protected fields are excluded.
+} // Ends the writable-field helper.
+
+function badRequest(message) { // Creates an error the central error middleware will turn into a 400 response.
+  const error = new Error(message); // Creates the error with a client-facing message.
+  error.statusCode = 400; // Marks the error as caused by invalid client input.
+  return error; // Returns the error so the caller can pass it to next().
+} // Ends the bad-request helper.
+
+function readClientChangeTime(body = {}) { // Reads WHEN the client made its change, used for last-write-wins.
+  if (body.updatedAt === undefined) return new Date(); // Treats clients that send no time, such as the dashboard, as changing the record now.
+  const changeTime = new Date(body.updatedAt); // Converts the client's ISO date text into a Date.
+  if (Number.isNaN(changeTime.getTime())) throw badRequest('updatedAt must be a valid date.'); // Rejects unreadable times instead of storing an invalid date.
+  return changeTime; // Returns the client's change time.
+} // Ends the client-change-time helper.
+
 async function createSubscription(req, res, next) { // Defines the controller that creates one subscription from the request body.
   try { // Begins error handling for the asynchronous database operation.
-    const subscription = await Subscription.create(req.body); // Validates the request data and saves a new subscription document.
+    const subscription = await Subscription.create(pickWritableFields(req.body)); // Validates only the writable fields and saves a new subscription with a server-generated UUID.
 
     res.status(201).json({ // Sets the Created HTTP status and starts the JSON response.
       message: 'Subscription created successfully.', // Gives the API client a clear result message.
@@ -15,10 +38,21 @@ async function createSubscription(req, res, next) { // Defines the controller th
 
 async function getSubscriptions(req, res, next) { // Defines the controller that fetches every subscription.
   try { // Begins error handling for the asynchronous database operation.
-    const subscriptions = await Subscription.find(); // Queries MongoDB for all subscription documents.
+    const serverTime = new Date(); // Takes the sync cursor BEFORE querying: a change stored during the query is returned again next time (harmless) instead of being missed.
+    const { updatedSince } = req.query; // Reads the optional delta-sync cursor from ?updatedSince=.
+    let filter = { deletedAt: null }; // Defaults to the normal list: subscriptions that are not deleted.
+
+    if (updatedSince !== undefined) { // Switches to delta-sync mode when the client sends a cursor.
+      const since = new Date(updatedSince); // Converts the cursor text into a Date.
+      if (Number.isNaN(since.getTime())) throw badRequest('updatedSince must be a valid date.'); // Rejects unreadable cursors.
+      filter = { serverUpdatedAt: { $gt: since } }; // Returns every change the server stored after the cursor, INCLUDING tombstones.
+    } // Ends the delta-sync check.
+
+    const subscriptions = await Subscription.find(filter); // Queries MongoDB with the selected filter.
 
     res.status(200).json({ // Sets the successful HTTP status and starts the JSON response.
       subscriptions, // Returns the array of matching subscription documents.
+      serverTime, // Returns the cursor the client should send as updatedSince on its next pull.
     }); // Ends and sends the fetch response.
   } catch (error) { // Receives a database error thrown while reading documents.
     next(error); // Passes the error to the central error middleware.
@@ -29,7 +63,7 @@ async function getSubscriptionById(req, res, next) { // Defines the controller t
   try { // Begins error handling for the asynchronous database operation.
     const subscription = await Subscription.findById(req.params.id); // Queries MongoDB for the subscription with the ID from the route URL.
 
-    if (!subscription) { // Checks whether MongoDB found a subscription with the supplied ID.
+    if (!subscription || subscription.deletedAt) { // Treats a missing or soft-deleted subscription the same way.
       return res.status(404).json({ // Stops the controller and sets the Not Found HTTP status.
         message: 'Subscription not found.', // Explains that no subscription exists with this ID.
       }); // Ends and sends the not-found response.
@@ -43,41 +77,67 @@ async function getSubscriptionById(req, res, next) { // Defines the controller t
   } // Ends the error-handling block.
 } // Ends the get-one-subscription controller.
 
-async function updateSubscription(req, res, next) { // Defines the controller that changes one subscription identified by the URL ID.
+async function upsertSubscription(req, res, next) { // Defines the controller that creates OR updates the subscription identified by the URL ID.
   try { // Begins error handling for the asynchronous database operation.
-    const subscription = await Subscription.findByIdAndUpdate( // Finds the document identified by req.params.id and applies request-body changes.
-      req.params.id, // Supplies the subscription ID from the :id part of the route URL.
-      req.body, // Supplies the fields that the client wants to change.
-      {
-        returnDocument: 'after', // Returns the updated document instead of returning its previous version.
-        runValidators: true, // Applies the Subscription schema validation rules to the changed fields.
-      }, // Ends the update options.
-    ); // Ends the find-and-update database operation.
+    const { id } = req.params; // Uses the URL ID, which offline clients generate themselves; any _id in the body is ignored.
+    const changeTime = readClientChangeTime(req.body); // Reads when the client made this change, for last-write-wins.
+    const fields = pickWritableFields(req.body); // Copies only the fields a client may write.
+    const existing = await Subscription.findById(id); // Looks for a subscription that already uses this ID.
 
-    if (!subscription) { // Checks whether MongoDB found a subscription with the supplied ID.
-      return res.status(404).json({ // Stops the controller and sets the Not Found HTTP status.
-        message: 'Subscription not found.', // Explains that no subscription exists with this ID.
-      }); // Ends and sends the not-found response.
-    } // Ends the missing-subscription check.
+    if (!existing) { // Handles an ID the server has never seen: the client created this record, possibly while offline.
+      const created = await Subscription.create({ ...fields, _id: id, updatedAt: changeTime }); // Saves the record under the CLIENT's ID, so a retried request finds it instead of creating a duplicate.
+      return res.status(201).json({ // Sets the Created HTTP status and starts the JSON response.
+        message: 'Subscription created successfully.', // Gives the API client a clear result message.
+        subscription: created, // Returns the stored subscription.
+        applied: true, // Tells sync clients their change was saved.
+      }); // Ends and sends the create response.
+    } // Ends the create branch.
+
+    if (existing.deletedAt) { // Handles an edit to a subscription that was deleted (possibly by another device).
+      return res.status(200).json({ // Responds successfully because the client simply needs to learn about the deletion.
+        message: 'The subscription was deleted; the change was not applied.', // Explains why the data did not change.
+        subscription: existing, // Returns the tombstone (with deletedAt) so the client deletes its copy too.
+        applied: false, // Tells sync clients their change was not saved: deletes win over later edits.
+      }); // Ends and sends the deleted response.
+    } // Ends the deleted check.
+
+    if (existing.updatedAt > changeTime) { // Detects a conflict: the server already holds a NEWER change than this one.
+      return res.status(200).json({ // Responds successfully because nothing is wrong with the request itself.
+        message: 'A newer version already exists; the change was not applied.', // Explains why the data did not change.
+        subscription: existing, // Returns the newer server version so the client can replace its stale copy.
+        applied: false, // Tells sync clients their change lost under last-write-wins.
+      }); // Ends and sends the not-applied response.
+    } // Ends the conflict check.
+
+    Object.assign(existing, fields, { updatedAt: changeTime }); // Applies the sent fields and records the client's change time.
+    await existing.save(); // Validates the changed document against the schema and stores it.
 
     res.status(200).json({ // Sets the successful HTTP status and starts the JSON response.
       message: 'Subscription updated successfully.', // Gives the API client a clear result message.
-      subscription, // Returns the updated subscription document.
+      subscription: existing, // Returns the updated subscription document.
+      applied: true, // Tells sync clients their change was saved.
     }); // Ends and sends the update response.
-  } catch (error) { // Receives validation, invalid-ID, or database errors thrown while updating.
+  } catch (error) { // Receives validation, bad-input, or database errors thrown while saving.
     next(error); // Passes the error to the central error middleware.
   } // Ends the error-handling block.
-} // Ends the update-subscription controller.
+} // Ends the upsert-subscription controller.
 
-async function deleteSubscription(req, res, next) { // Defines the controller that removes one subscription identified by the URL ID.
+async function deleteSubscription(req, res, next) { // Defines the controller that soft-deletes one subscription identified by the URL ID.
   try { // Begins error handling for the asynchronous database operation.
-    const subscription = await Subscription.findByIdAndDelete(req.params.id); // Finds and permanently deletes the subscription with the URL ID.
+    const changeTime = readClientChangeTime(req.body); // Reads when the client deleted it; clients that send nothing count as now.
+    const subscription = await Subscription.findById(req.params.id); // Looks up the subscription with the URL ID.
 
     if (!subscription) { // Checks whether MongoDB found a subscription with the supplied ID.
       return res.status(404).json({ // Stops the controller and sets the Not Found HTTP status.
-        message: 'Subscription not found.', // Explains that no subscription exists with this ID.
+        message: 'Subscription not found.', // Explains that no subscription exists with this ID; sync clients can treat this as already gone.
       }); // Ends and sends the not-found response.
     } // Ends the missing-subscription check.
+
+    if (!subscription.deletedAt) { // Only marks it once, so deleting twice (for example, a retried request) changes nothing.
+      subscription.deletedAt = new Date(); // Records the deletion with the server's time.
+      subscription.updatedAt = changeTime; // Records when the client made the deletion.
+      await subscription.save(); // Stores the tombstone; the pre-save hook updates serverUpdatedAt so delta pulls see it.
+    } // Ends the first-deletion check.
 
     res.status(200).json({ // Sets the successful HTTP status and starts the JSON response.
       message: 'Subscription deleted successfully.', // Gives the API client a clear result message.
@@ -87,10 +147,10 @@ async function deleteSubscription(req, res, next) { // Defines the controller th
   } // Ends the error-handling block.
 } // Ends the delete-subscription controller.
 
-module.exports = { // Exports all four controllers so the route file can connect URLs to them.
+module.exports = { // Exports all five controllers so the route file can connect URLs to them.
   createSubscription, // Exports the controller for POST requests.
   getSubscriptions, // Exports the controller for GET requests.
   getSubscriptionById, // Exports the controller for GET requests that include one subscription ID.
-  updateSubscription, // Exports the controller for PUT requests.
+  upsertSubscription, // Exports the controller for PUT requests, which create or update by ID.
   deleteSubscription, // Exports the controller for DELETE requests.
 }; // Ends the exported controller object.

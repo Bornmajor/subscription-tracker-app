@@ -1,7 +1,12 @@
+const { randomUUID } = require('node:crypto'); // Imports Node.js's built-in generator for random UUID strings.
 const mongoose = require('mongoose'); // Imports Mongoose so this file can define a MongoDB schema and model.
 
 const subscriptionSchema = new mongoose.Schema( // Creates rules for the shape of every subscription document.
   {
+    _id: { // Replaces MongoDB's default ObjectId with a UUID string so offline clients can create IDs themselves.
+      type: String, // Stores the ID as text, such as 3f2b8c1e-6a4d-4f0e-9b7a-2c5d8e1f0a3b.
+      default: () => randomUUID(), // Generates a UUID when the server creates a subscription without a client-supplied ID.
+    }, // Ends the _id field configuration.
     name: { // Defines the subscription service name, such as Netflix.
       type: String, // Requires the name value to be text.
       required: [true, 'Subscription name is required.'], // Rejects a subscription when its name is missing.
@@ -15,9 +20,9 @@ const subscriptionSchema = new mongoose.Schema( // Creates rules for the shape o
     billingCycle: { // Defines how often the subscription charges the customer.
       type: String, // Requires the billing cycle value to be text.
       required: [true, 'Billing cycle is required.'], // Rejects a subscription when its billing cycle is missing.
-      enum: { // Limits the billing cycle to the values supported by this first version of the API.
-        values: ['monthly', 'yearly'], // Allows only monthly and yearly billing.
-        message: 'Billing cycle must be monthly or yearly.', // Explains why Mongoose rejects any other billing cycle.
+      enum: { // Limits the billing cycle to the values the mobile app also supports.
+        values: ['daily', 'weekly', 'monthly', 'yearly'], // Allows the same four billing cycles as the mobile app.
+        message: 'Billing cycle must be daily, weekly, monthly, or yearly.', // Explains why Mongoose rejects any other billing cycle.
       }, // Ends the allowed billing-cycle values.
     }, // Ends the billingCycle field configuration.
     nextPaymentDate: { // Defines the date when the subscription will next charge.
@@ -29,11 +34,28 @@ const subscriptionSchema = new mongoose.Schema( // Creates rules for the shape o
       required: [true, 'Subscription category is required.'], // Rejects a subscription when its category is missing.
       trim: true, // Removes accidental whitespace from the beginning and end of the category.
     }, // Ends the category field configuration.
+    updatedAt: { // Records WHEN the latest change was made, by whichever client made it.
+      type: Date, // Stores the change time as a date.
+      default: Date.now, // Uses the current server time when a client does not supply its own change time.
+    }, // Ends the updatedAt field configuration; last-write-wins compares this value.
+    deletedAt: { // Marks a soft-deleted subscription (a tombstone) instead of removing the document.
+      type: Date, // Stores when the subscription was deleted.
+      default: null, // Uses null for subscriptions that are not deleted.
+    }, // Ends the deletedAt field; keeping tombstones lets other devices learn about deletions.
+    serverUpdatedAt: { // Records WHEN the server stored the latest change, always using the server's clock.
+      type: Date, // Stores the server-side change time.
+      default: Date.now, // Uses the current server time for new documents.
+      index: true, // Speeds up delta-sync queries that filter by this field.
+    }, // Ends the serverUpdatedAt field; delta pulls use it because device clocks can be wrong.
   }, // Ends the fields stored for each subscription.
   {
-    timestamps: true, // Makes Mongoose automatically maintain createdAt and updatedAt date fields.
+    timestamps: { createdAt: true, updatedAt: false }, // Lets Mongoose maintain createdAt only; updatedAt is controlled by the API so offline edits keep their real change time.
   }, // Ends the schema options.
 ); // Ends the Subscription schema definition.
+
+subscriptionSchema.pre('save', function setServerUpdatedAt() { // Runs before every create or save of a subscription document.
+  this.serverUpdatedAt = new Date(); // Stamps the server's own time on every stored change so delta pulls never miss it.
+}); // Ends the pre-save hook.
 
 const Subscription = mongoose.model('Subscription', subscriptionSchema); // Creates the model used to query and save subscriptions.
 
