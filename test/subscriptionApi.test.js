@@ -104,14 +104,14 @@ test('subscription routes create, fetch, update, and delete a subscription', asy
   assert.equal(missingBody.message, 'Subscription not found.'); // Confirms that the API returns the expected missing-resource message.
 }); // Ends the end-to-end CRUD test.
 
-test('subscription routes return Bad Request for invalid data and IDs', async () => { // Defines the integration test for Mongoose validation and ID conversion failures.
+test('subscription routes return Bad Request for invalid data', async () => { // Defines the integration test for Mongoose validation failures.
   const invalidDataResponse = await request('/api/subscriptions', { // Sends a create request containing schema-invalid data.
     method: 'POST', // Uses POST because the request attempts to create a resource.
     headers: authorizedHeaders(), // Supplies the required API key and JSON content type.
     body: JSON.stringify({ // Converts the invalid subscription values into a JSON request body.
       name: 'Invalid Subscription', // Provides a valid name so the invalid fields below are isolated.
       price: 0, // Violates the positive-price validation rule.
-      billingCycle: 'weekly', // Violates the monthly-or-yearly validation rule.
+      billingCycle: 'fortnightly', // Violates the daily, weekly, monthly, or yearly validation rule.
       nextPaymentDate: '2026-10-07', // Provides a valid date so the invalid fields above are isolated.
       category: 'testing', // Provides a valid category so the invalid fields above are isolated.
     }), // Ends the invalid request body.
@@ -121,12 +121,34 @@ test('subscription routes return Bad Request for invalid data and IDs', async ()
   assert.equal(invalidDataResponse.status, 400); // Confirms that schema-invalid client data returns Bad Request rather than Server Error.
   assert.match(invalidDataBody.message, /Subscription validation failed/); // Confirms that the response identifies the validation failure.
 
-  const invalidIdResponse = await request('/api/subscriptions/not-a-mongodb-id', { headers: authorizedHeaders() }); // Sends a fetch-one request with an ID that Mongoose cannot parse.
-  const invalidIdBody = await invalidIdResponse.json(); // Reads the invalid-ID error response.
+}); // Ends the invalid-data test.
 
-  assert.equal(invalidIdResponse.status, 400); // Confirms that a malformed ID returns Bad Request.
-  assert.match(invalidIdBody.message, /Cast to ObjectId failed/); // Confirms that the response identifies the invalid identifier.
-}); // Ends the invalid-data-and-ID test.
+test('subscription routes return Not Found for an unknown ID', async () => { // Defines the test for IDs that match no document.
+  const response = await request('/api/subscriptions/not-an-existing-id', { headers: authorizedHeaders() }); // Requests an ID that no subscription uses; IDs are plain strings, so this is not a format error.
+  const body = await response.json(); // Reads the not-found response sent by the API.
+
+  assert.equal(response.status, 404); // Confirms that an unknown ID returns Not Found rather than Bad Request.
+  assert.equal(body.message, 'Subscription not found.'); // Confirms that the API returns the expected missing-resource message.
+}); // Ends the unknown-ID test.
+
+test('subscription routes create a weekly subscription with a UUID ID', async () => { // Defines the test for the new billing cycles and ID format through HTTP.
+  const response = await request('/api/subscriptions', { // Sends a request to create a subscription through the HTTP API.
+    method: 'POST', // Uses POST because this request creates a new resource.
+    headers: authorizedHeaders(), // Supplies the required API key and JSON content type.
+    body: JSON.stringify({ // Converts the new subscription values into a JSON request body.
+      name: 'Weekly Groceries', // Provides the required subscription name.
+      price: 25, // Provides a valid positive price.
+      billingCycle: 'weekly', // Uses one of the billing cycles added for the mobile app.
+      nextPaymentDate: '2026-10-07', // Provides a valid payment date.
+      category: 'food', // Provides the required category.
+    }), // Ends the request body.
+  }); // Ends the create request options.
+  const body = await response.json(); // Reads the created subscription returned by the API.
+
+  assert.equal(response.status, 201); // Confirms that a weekly subscription is accepted.
+  assert.equal(body.subscription.billingCycle, 'weekly'); // Confirms that the billing cycle was saved.
+  assert.match(body.subscription._id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/); // Confirms that the server generated a UUID string ID.
+}); // Ends the weekly-UUID test.
 
 test('unknown routes return Not Found', async () => { // Defines the integration test for the application's unknown-route middleware.
   const response = await request('/api/does-not-exist'); // Sends a request to a URL that no registered Express route handles.

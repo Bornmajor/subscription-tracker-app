@@ -1,7 +1,12 @@
+const { randomUUID } = require('node:crypto'); // Imports Node.js's built-in generator for random UUID strings.
 const mongoose = require('mongoose'); // Imports Mongoose so this file can define a MongoDB schema and model.
 
 const subscriptionSchema = new mongoose.Schema( // Creates rules for the shape of every subscription document.
   {
+    _id: { // Replaces MongoDB's default ObjectId with a UUID string so offline clients can create IDs themselves.
+      type: String, // Stores the ID as text, such as 3f2b8c1e-6a4d-4f0e-9b7a-2c5d8e1f0a3b.
+      default: () => randomUUID(), // Generates a UUID when the server creates a subscription without a client-supplied ID.
+    }, // Ends the _id field configuration.
     name: { // Defines the subscription service name, such as Netflix.
       type: String, // Requires the name value to be text.
       required: [true, 'Subscription name is required.'], // Rejects a subscription when its name is missing.
@@ -15,9 +20,9 @@ const subscriptionSchema = new mongoose.Schema( // Creates rules for the shape o
     billingCycle: { // Defines how often the subscription charges the customer.
       type: String, // Requires the billing cycle value to be text.
       required: [true, 'Billing cycle is required.'], // Rejects a subscription when its billing cycle is missing.
-      enum: { // Limits the billing cycle to the values supported by this first version of the API.
-        values: ['monthly', 'yearly'], // Allows only monthly and yearly billing.
-        message: 'Billing cycle must be monthly or yearly.', // Explains why Mongoose rejects any other billing cycle.
+      enum: { // Limits the billing cycle to the values the mobile app also supports.
+        values: ['daily', 'weekly', 'monthly', 'yearly'], // Allows the same four billing cycles as the mobile app.
+        message: 'Billing cycle must be daily, weekly, monthly, or yearly.', // Explains why Mongoose rejects any other billing cycle.
       }, // Ends the allowed billing-cycle values.
     }, // Ends the billingCycle field configuration.
     nextPaymentDate: { // Defines the date when the subscription will next charge.

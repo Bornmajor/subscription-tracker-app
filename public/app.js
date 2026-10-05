@@ -171,7 +171,7 @@ subscriptionForm.addEventListener('submit', async (event) => { // Runs whenever 
   const subscriptionData = { // Creates the JSON object expected by the Express API.
     name: formData.get('name'), // Uses the entered subscription name.
     price: Number(formData.get('price')), // Converts the price text into a JavaScript number.
-    billingCycle: formData.get('billingCycle'), // Uses the selected monthly or yearly billing cycle.
+    billingCycle: formData.get('billingCycle'), // Uses the selected daily, weekly, monthly, or yearly billing cycle.
     nextPaymentDate: formData.get('nextPaymentDate'), // Uses the selected next-payment date.
     category: formData.get('category'), // Uses the entered category label.
   }; // Ends the subscription-data object.

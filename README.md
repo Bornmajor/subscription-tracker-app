@@ -171,7 +171,7 @@ Each subscription will use the following fields:
 {
   name: String,             // For example: Netflix
   price: Number,            // Must be greater than zero
-  billingCycle: String,     // monthly or yearly
+  billingCycle: String,     // daily, weekly, monthly, or yearly
   nextPaymentDate: Date,
   category: String,         // For example: entertainment
   createdAt: Date,
