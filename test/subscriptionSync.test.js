@@ -170,3 +170,40 @@ test('every stored change updates serverUpdatedAt', async () => { // Tests the s
   assert.ok(created > new Date('2026-01-01')); // Confirms the server used its own clock, not the old client time.
   assert.ok(deleted >= created); // Confirms the deletion moved serverUpdatedAt forward.
 }); // Ends the serverUpdatedAt test.
+
+test('GET returns serverTime to use as the next cursor', async () => { // Tests that every list response includes a cursor.
+  const before = new Date(); // Records the time before the request.
+  const { body } = await send('GET', ''); // Fetches the normal list.
+
+  assert.ok(new Date(body.serverTime) >= before); // Confirms the cursor is the server's current time.
+}); // Ends the cursor test.
+
+test('GET ?updatedSince returns only changes stored after the cursor', async () => { // Tests delta pulls.
+  await put(CLIENT_ID, validBody({ name: 'Old' })); // Stores a change before the cursor.
+  const { body: first } = await send('GET', ''); // Performs a pull and receives a cursor.
+  const otherId = 'a1a1a1a1-b2b2-4c3c-8d4d-e5e5e5e5e5e5'; // Represents another record created later.
+  await put(otherId, validBody({ name: 'New' })); // Stores a change after the cursor.
+
+  const { body } = await send('GET', `?updatedSince=${encodeURIComponent(first.serverTime)}`); // Pulls changes since the cursor.
+
+  assert.deepEqual(body.subscriptions.map((s) => s.name), ['New']); // Confirms only the later change is returned.
+}); // Ends the delta test.
+
+test('GET ?updatedSince includes deletions (tombstones)', async () => { // Tests that deletions reach other devices.
+  await put(CLIENT_ID, validBody()); // Creates the subscription.
+  const { body: first } = await send('GET', ''); // Performs a pull and receives a cursor.
+  await send('DELETE', `/${CLIENT_ID}`); // Deletes it after the cursor.
+
+  const { body } = await send('GET', `?updatedSince=${encodeURIComponent(first.serverTime)}`); // Pulls changes since the cursor.
+
+  assert.equal(body.subscriptions.length, 1); // Confirms the deletion is included.
+  assert.equal(body.subscriptions[0]._id, CLIENT_ID); // Confirms it is the deleted subscription.
+  assert.ok(body.subscriptions[0].deletedAt); // Confirms it carries deletedAt so the client deletes its copy.
+}); // Ends the tombstone-delta test.
+
+test('GET ?updatedSince rejects an invalid cursor', async () => { // Tests cursor validation.
+  const { status, body } = await send('GET', '?updatedSince=not-a-date'); // Sends an unreadable cursor.
+
+  assert.equal(status, 400); // Confirms the request is rejected.
+  assert.equal(body.message, 'updatedSince must be a valid date.'); // Confirms the error explains the problem.
+}); // Ends the invalid-cursor test.

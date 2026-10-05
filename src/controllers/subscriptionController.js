@@ -38,10 +38,21 @@ async function createSubscription(req, res, next) { // Defines the controller th
 
 async function getSubscriptions(req, res, next) { // Defines the controller that fetches every subscription.
   try { // Begins error handling for the asynchronous database operation.
-    const subscriptions = await Subscription.find({ deletedAt: null }); // Queries MongoDB for subscriptions that are not soft-deleted.
+    const serverTime = new Date(); // Takes the sync cursor BEFORE querying: a change stored during the query is returned again next time (harmless) instead of being missed.
+    const { updatedSince } = req.query; // Reads the optional delta-sync cursor from ?updatedSince=.
+    let filter = { deletedAt: null }; // Defaults to the normal list: subscriptions that are not deleted.
+
+    if (updatedSince !== undefined) { // Switches to delta-sync mode when the client sends a cursor.
+      const since = new Date(updatedSince); // Converts the cursor text into a Date.
+      if (Number.isNaN(since.getTime())) throw badRequest('updatedSince must be a valid date.'); // Rejects unreadable cursors.
+      filter = { serverUpdatedAt: { $gt: since } }; // Returns every change the server stored after the cursor, INCLUDING tombstones.
+    } // Ends the delta-sync check.
+
+    const subscriptions = await Subscription.find(filter); // Queries MongoDB with the selected filter.
 
     res.status(200).json({ // Sets the successful HTTP status and starts the JSON response.
       subscriptions, // Returns the array of matching subscription documents.
+      serverTime, // Returns the cursor the client should send as updatedSince on its next pull.
     }); // Ends and sends the fetch response.
   } catch (error) { // Receives a database error thrown while reading documents.
     next(error); // Passes the error to the central error middleware.
