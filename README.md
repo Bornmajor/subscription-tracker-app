@@ -1,5 +1,7 @@
 # Subscription Tracker REST API
 
+[![CI](https://github.com/Bornmajor/subscription-tracker-app/actions/workflows/ci.yml/badge.svg)](https://github.com/Bornmajor/subscription-tracker-app/actions/workflows/ci.yml)
+
 ## Project goal
 
 Build a small REST API with Express.js for managing subscriptions. The API will use one shared API key to protect every subscription endpoint. There are no user accounts, registration, login, passwords, or JWTs.
@@ -112,6 +114,19 @@ When every test passes, the output ends with:
 ℹ pass 32
 ℹ fail 0
 ```
+
+## Continuous integration
+
+The project uses a GitHub Actions workflow, [`.github/workflows/ci.yml`](.github/workflows/ci.yml), to run the test suite automatically on every push and pull request to `main`.
+
+| Step | What it does |
+| --- | --- |
+| Start MongoDB | Runs a MongoDB 7 service container so the integration tests use a real database. |
+| Node.js matrix | Runs the tests on Node.js 20, 22, and 24 in parallel. |
+| Install dependencies | Runs `npm ci` with npm caching for fast, reproducible installs. |
+| Run tests | Runs `npm test` with `MONGODB_TEST_URI` and a placeholder `API_KEY` set in the workflow, so no repository secrets are required. |
+
+The CI badge at the top of this README shows the result of the latest run. Results for each run appear in the repository's **Actions** tab and on pull requests.
 
 ## Tools
 
